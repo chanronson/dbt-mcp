@@ -1,0 +1,1 @@
+Path to the dbt project directory to run against (must contain dbt_project.yml). If omitted, the server's configured default project directory is used. Supports `~` and environment variable expansion; relative paths resolve against the server working directory.
