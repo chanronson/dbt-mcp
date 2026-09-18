@@ -10,6 +10,10 @@ from pydantic import Field
 
 from dbt_mcp.config.config import DbtCliConfig
 from dbt_mcp.dbt_cli.binary_type import BinaryType, get_color_disable_flag
+from dbt_mcp.dbt_cli.project_dir import (  # noqa: F401 -- Part 1 contract single import site; wired into calls in Part 3
+    _resolve_project_dir,
+    _validate_project_dir,
+)
 from dbt_mcp.dbt_cli.models.lineage_types import ModelLineage
 from dbt_mcp.dbt_cli.models.manifest import Manifest
 from dbt_mcp.dbt_cli.subprocess_env import get_dbt_subprocess_env
