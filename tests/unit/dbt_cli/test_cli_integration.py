@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -30,6 +32,23 @@ class TestDbtCliIntegration(unittest.TestCase):
             enabled_toolsets=set(),
             disabled_toolsets=set(),
         )
+
+        # Part 3 validates the resolved project_dir at call time, so the
+        # shared mock config's fake '/test/project' (nonexistent, no
+        # dbt_project.yml) no longer passes. Use a real tmp project dir.
+        # Fixture-only change — no logic change.
+        with tempfile.TemporaryDirectory() as project_dir:
+            with open(os.path.join(project_dir, "dbt_project.yml"), "w") as f:
+                f.write("name: cli_integration_project\n")
+            previous = mock_config.dbt_cli_config.project_dir
+            mock_config.dbt_cli_config.project_dir = project_dir
+            try:
+                self._run_cases(mock_popen, mock_fastmcp, project_dir)
+            finally:
+                mock_config.dbt_cli_config.project_dir = previous
+
+    def _run_cases(self, mock_popen, mock_fastmcp, project_dir):
+        """Execute the command table against a real tmp project dir."""
 
         # Test cases for different command types
         test_cases = [
@@ -101,7 +120,7 @@ class TestDbtCliIntegration(unittest.TestCase):
             self.assertEqual(actual_args[:num_params], expected_args[:num_params])
 
             # Verify correct working directory
-            self.assertEqual(mock_popen.call_args.kwargs.get("cwd"), "/test/project")
+            self.assertEqual(mock_popen.call_args.kwargs.get("cwd"), project_dir)
 
             # Verify the output is returned correctly
             self.assertEqual(result, "command output")

@@ -25,6 +25,19 @@ def mock_process():
     return MockProcess()
 
 
+@pytest.fixture(autouse=True)
+def _real_startup_project_dir(tmp_path, monkeypatch):
+    """Part 3 validates the resolved project_dir at call time, so the shared
+    mock config's fake '/test/project' (nonexistent, no dbt_project.yml) no
+    longer passes validation. Point it at a real tmp project for every test
+    in this module. Fixture-only change — no logic change."""
+    proj = tmp_path / "startup-project"
+    proj.mkdir(exist_ok=True)
+    (proj / "dbt_project.yml").write_text("name: startup_project\n")
+    monkeypatch.setattr(mock_dbt_cli_config, "project_dir", str(proj))
+    return proj
+
+
 @pytest.mark.parametrize(
     "sql_query,limit_param,expected_args",
     [
@@ -653,6 +666,7 @@ def test_clone_command_binary_state_path_logic(
     monkeypatch: MonkeyPatch,
     mock_process,
     mock_fastmcp,
+    tmp_path: Path,
 ):
     mock_calls = []
 
@@ -664,9 +678,15 @@ def test_clone_command_binary_state_path_logic(
 
     fastmcp, tools = mock_fastmcp
 
+    # Real tmp project dir: Part 3 validates project_dir at call time, so the
+    # old fake '/test/project' no longer passes (nonexistent, no yml).
+    real_project = tmp_path / "clone-project"
+    real_project.mkdir(exist_ok=True)
+    (real_project / "dbt_project.yml").write_text("name: clone_project\n")
+
     # Case 1: DBT_CORE (--state should be added)
     core_cli_config = DbtCliConfig(
-        project_dir="/test/project",
+        project_dir=str(real_project),
         dbt_path="/path/to/dbt",
         dbt_cli_timeout=10,
         binary_type=BinaryType.DBT_CORE,
@@ -688,7 +708,7 @@ def test_clone_command_binary_state_path_logic(
     # Case 2: DBT_CLOUD_CLI (--state should NOT be added)
     mock_calls.clear()
     cloud_cli_config = DbtCliConfig(
-        project_dir="/test/project",
+        project_dir=str(real_project),
         dbt_path="/path/to/dbt",
         dbt_cli_timeout=10,
         binary_type=BinaryType.DBT_CLOUD_CLI,
@@ -711,7 +731,7 @@ def test_clone_command_binary_state_path_logic(
     # Case 3: FUSION (--state should be added)
     mock_calls.clear()
     fusion_cli_config = DbtCliConfig(
-        project_dir="/test/project",
+        project_dir=str(real_project),
         dbt_path="/path/to/dbt",
         dbt_cli_timeout=10,
         binary_type=BinaryType.FUSION,
@@ -855,6 +875,11 @@ def test_get_lineage_dev_resolves_manifest_from_relative_project_dir(
     manifest_dir = tmp_path / project_name / "target"
     manifest_dir.mkdir(parents=True)
     (manifest_dir / "manifest.json").write_text(json.dumps({}))
+    # Part 3 validates the resolved dir at call time: the project needs a
+    # dbt_project.yml marker, not just target/manifest.json.
+    (tmp_path / project_name / "dbt_project.yml").write_text(
+        "name: my_project\n"
+    )
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: mock_process)

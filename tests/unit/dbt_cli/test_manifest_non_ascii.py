@@ -25,6 +25,9 @@ def test_manifest_loads_non_ascii_utf8(
     """Regression test for #594: manifest with non-ASCII UTF-8 chars should load without error."""
     manifest_dir = tmp_path / "target"
     manifest_dir.mkdir()
+    # Part 3 validates the resolved project_dir at call time: tmp_path is the
+    # project dir here, so it needs the dbt_project.yml marker.
+    (tmp_path / "dbt_project.yml").write_text("name: my_project\n")
     manifest_data = {
         "nodes": {
             "model.my_project.customers": {

@@ -18,8 +18,20 @@ def mock_process():
     return MockProcess()
 
 
+@pytest.fixture
+def real_project_dir(tmp_path, monkeypatch):
+    """Part 3 validates the resolved project_dir at call time, so the shared
+    mock config's fake '/test/project' (nonexistent, no dbt_project.yml) no
+    longer passes. Point it at a real tmp project. Fixture-only change."""
+    proj = tmp_path / "project"
+    proj.mkdir(exist_ok=True)
+    (proj / "dbt_project.yml").write_text("name: test_project\n")
+    monkeypatch.setattr(mock_dbt_cli_config, "project_dir", str(proj))
+    return proj
+
+
 def test_manifest_uses_utf8_encoding(
-    monkeypatch: MonkeyPatch, mock_process, mock_fastmcp
+    monkeypatch: MonkeyPatch, mock_process, mock_fastmcp, real_project_dir
 ):
     """Regression test for #594: open() without encoding defaults to CP-1252 on Windows."""
 
@@ -42,5 +54,5 @@ def test_manifest_uses_utf8_encoding(
         tools["get_lineage_dev"](unique_id="model.a", types=None, depth=5)
 
     mock_file.assert_called_once_with(
-        "/test/project/target/manifest.json", encoding="utf-8"
+        f"{real_project_dir}/target/manifest.json", encoding="utf-8"
     )
