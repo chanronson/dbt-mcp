@@ -79,6 +79,23 @@ Allowing your client to utilize dbt commands through the MCP tooling could modif
 - `show`: Executes SQL against the database and returns results.
 - `test`: Runs tests to validate data and model integrity.
 
+#### Runtime `project_dir`: security note
+
+The per-call `project_dir` override (v1) performs no allowlist check — any
+absolute path readable by the server is accepted. This carries risk: path
+traversal to sensitive directories, arbitrary local project execution, and
+`dbt_project.yml` presence is not a sandbox boundary. Only expose the server
+to trusted clients. An allowlist (e.g. `DBT_PROJECT_DIR_ALLOWLIST` or
+similar) is an explicit follow-up and is not implemented.
+
+#### Runtime `project_dir`: scope limitation (CLI-only)
+
+Passing `project_dir` to a dbt CLI tool does not move anything else. LSP
+tools stay startup-bound (`LspConfig` / `LocalLSPConnectionProvider.project_dir`
+unchanged), and the same applies to codegen (`DbtCodegenConfig` untouched),
+Discovery / Semantic Layer / Admin tools, `dbt_version_provider`, and
+`DBT_PROFILES_DIR`.
+
 ### Admin API
 
 To learn more about the dbt Administrative API, click [here](https://docs.getdbt.com/docs/dbt-cloud-apis/admin-cloud-api).
