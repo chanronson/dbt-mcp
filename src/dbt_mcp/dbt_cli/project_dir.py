@@ -59,15 +59,12 @@ def _validate_project_dir(path: str) -> str:
         raise InvalidParameterError(f"project_dir is not a directory: {resolved}")
     if not (candidate / "dbt_project.yml").is_file():
         raise InvalidParameterError(
-            "project_dir is not a dbt project "
-            f"(missing dbt_project.yml): {resolved}"
+            f"project_dir is not a dbt project (missing dbt_project.yml): {resolved}"
         )
     return resolved
 
 
-def _resolve_project_dir(
-    config: DbtCliConfig | Any, project_dir: str | None
-) -> str:
+def _resolve_project_dir(config: DbtCliConfig | Any, project_dir: str | None) -> str:
     """Resolve the effective project dir for one tool call.
 
     Explicit non-empty ``project_dir`` wins; ``None``/empty/whitespace-only

@@ -149,7 +149,9 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
 
             # resolved is always absolute; Cloud CLI ignores the local project
             # dir for execution so its subprocess keeps the server cwd.
-            cwd_path = None if config.binary_type == BinaryType.DBT_CLOUD_CLI else resolved
+            cwd_path = (
+                None if config.binary_type == BinaryType.DBT_CLOUD_CLI else resolved
+            )
 
             # Add appropriate color disable flag based on binary type
             color_flag = get_color_disable_flag(config.binary_type)
