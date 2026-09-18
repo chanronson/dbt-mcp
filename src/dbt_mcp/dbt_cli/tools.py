@@ -54,6 +54,20 @@ _VALID_RESOURCE_TYPES = frozenset(
 
 
 def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition]:
+    try:
+        project_dir_description = get_prompt("dbt_cli/args/project_dir")
+    except OSError:
+        # Part 4 adds prompts/dbt_cli/args/project_dir.md; until then fall
+        # back to this string (kept identical to that file's content) so tool
+        # registration never crashes. Once the file exists, get_prompt wins.
+        project_dir_description = (
+            "Path to the dbt project directory to run against "
+            "(must contain dbt_project.yml). If omitted, the server's "
+            "configured default project directory is used. Supports `~` and "
+            "environment variable expansion; relative paths resolve against "
+            "the server working directory."
+        )
+
     def _run_dbt_command(
         command: list[str],
         node_selection: str | None = None,
@@ -64,8 +78,10 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
         sample: str | None = None,
         yml_selector: str | None = None,
         state_path: str | None = None,
+        project_dir: str | None = None,
     ) -> str:
         try:
+            resolved = _resolve_project_dir(config, project_dir)
             # Commands that should always be quiet to reduce output verbosity
             verbose_commands = [
                 "build",
@@ -77,6 +93,10 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
                 "list",
                 "clone",
             ]
+            # Relative state_path is passed verbatim and resolves against the
+            # subprocess cwd (the resolved project_dir for Core/Fusion; the
+            # server cwd for Cloud CLI, which rejects --state anyway).
+            # Prefer an absolute path when the caller is unsure.
             if (
                 # dbt CLI (Cloud CLI) does not support --state
                 config.binary_type != BinaryType.DBT_CLOUD_CLI
@@ -127,14 +147,18 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
                 command_args = full_command[1:] if len(full_command) > 1 else []
                 full_command = [main_command, "--quiet", *command_args]
 
+            # resolved is always absolute; Cloud CLI ignores the local project
+            # dir for execution so its subprocess keeps the server cwd.
+            cwd_path = None if config.binary_type == BinaryType.DBT_CLOUD_CLI else resolved
+
             # Add appropriate color disable flag based on binary type
             color_flag = get_color_disable_flag(config.binary_type)
             args = [config.dbt_path, color_flag, *full_command]
 
             process = subprocess.Popen(
                 args=args,
-                cwd=config.project_dir,
-                env=get_dbt_subprocess_env(config.project_dir, config.profiles_dir),
+                cwd=cwd_path,
+                env=get_dbt_subprocess_env(resolved, config.profiles_dir),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 stdin=subprocess.DEVNULL,
@@ -178,6 +202,9 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
         sample: str | None = Field(
             default=None, description=get_prompt("dbt_cli/args/sample")
         ),
+        project_dir: str | None = Field(
+            default=None, description=project_dir_description
+        ),
     ) -> str:
         return _run_dbt_command(
             ["build"],
@@ -187,6 +214,7 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
             vars=vars,
             sample=sample,
             yml_selector=yml_selector,
+            project_dir=project_dir,
         )
 
     def compile(
@@ -196,13 +224,24 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
         yml_selector: str | None = Field(
             default=None, description=get_prompt("dbt_cli/args/yml_selector")
         ),
+        project_dir: str | None = Field(
+            default=None, description=project_dir_description
+        ),
     ) -> str:
         return _run_dbt_command(
-            ["compile"], node_selection, is_selectable=True, yml_selector=yml_selector
+            ["compile"],
+            node_selection,
+            is_selectable=True,
+            yml_selector=yml_selector,
+            project_dir=project_dir,
         )
 
-    def docs() -> str:
-        return _run_dbt_command(["docs", "generate"])
+    def docs(
+        project_dir: str | None = Field(
+            default=None, description=project_dir_description
+        ),
+    ) -> str:
+        return _run_dbt_command(["docs", "generate"], project_dir=project_dir)
 
     def ls(
         node_selection: str | None = Field(
@@ -215,6 +254,9 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
             default=None,
             description=get_prompt("dbt_cli/args/resource_type"),
         ),
+        project_dir: str | None = Field(
+            default=None, description=project_dir_description
+        ),
     ) -> str:
         return _run_dbt_command(
             ["list"],
@@ -222,10 +264,15 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
             resource_type=resource_type,
             is_selectable=True,
             yml_selector=yml_selector,
+            project_dir=project_dir,
         )
 
-    def parse() -> str:
-        return _run_dbt_command(["parse"])
+    def parse(
+        project_dir: str | None = Field(
+            default=None, description=project_dir_description
+        ),
+    ) -> str:
+        return _run_dbt_command(["parse"], project_dir=project_dir)
 
     def run(
         node_selection: str | None = Field(
@@ -243,6 +290,9 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
         sample: str | None = Field(
             default=None, description=get_prompt("dbt_cli/args/sample")
         ),
+        project_dir: str | None = Field(
+            default=None, description=project_dir_description
+        ),
     ) -> str:
         return _run_dbt_command(
             ["run"],
@@ -252,6 +302,7 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
             vars=vars,
             sample=sample,
             yml_selector=yml_selector,
+            project_dir=project_dir,
         )
 
     def test(
@@ -264,6 +315,9 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
         vars: str | None = Field(
             default=None, description=get_prompt("dbt_cli/args/vars")
         ),
+        project_dir: str | None = Field(
+            default=None, description=project_dir_description
+        ),
     ) -> str:
         return _run_dbt_command(
             ["test"],
@@ -271,11 +325,15 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
             is_selectable=True,
             vars=vars,
             yml_selector=yml_selector,
+            project_dir=project_dir,
         )
 
     def show(
         sql_query: str = Field(description=get_prompt("dbt_cli/args/sql_query")),
         limit: int = Field(default=5, description=get_prompt("dbt_cli/args/limit")),
+        project_dir: str | None = Field(
+            default=None, description=project_dir_description
+        ),
     ) -> str:
         args = ["show", "--inline", sql_query, "--favor-state"]
         # This is quite crude, but it should be okay for now
@@ -293,7 +351,7 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
         if cli_limit is not None:
             args.extend(["--limit", str(cli_limit)])
         args.extend(["--output", "json"])
-        return _run_dbt_command(args)
+        return _run_dbt_command(args, project_dir=project_dir)
 
     def clone(
         node_selection: str | None = Field(
@@ -312,6 +370,9 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
         state_path: str | None = Field(
             default=None, description=get_prompt("dbt_cli/args/state_path")
         ),
+        project_dir: str | None = Field(
+            default=None, description=project_dir_description
+        ),
     ) -> str:
         return _run_dbt_command(
             ["clone"],
@@ -321,14 +382,15 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
             vars=vars,
             yml_selector=yml_selector,
             state_path=state_path,
+            project_dir=project_dir,
         )
 
-    def _get_manifest() -> Manifest:
+    def _get_manifest(project_dir: str | None = None) -> Manifest:
         """Helper function to load the dbt manifest.json file."""
-        _run_dbt_command(["parse"])  # Ensure manifest is generated
-        manifest_path = os.path.join(
-            config.project_dir or ".", "target", "manifest.json"
-        )
+        resolved = _resolve_project_dir(config, project_dir)
+        # Ensure manifest is generated
+        _run_dbt_command(["parse"], project_dir=project_dir)
+        manifest_path = os.path.join(resolved, "target", "manifest.json")
         with open(manifest_path, encoding="utf-8") as f:
             manifest_data = json.load(f)
         return Manifest(**manifest_data)
@@ -337,8 +399,11 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
         unique_id: str = UNIQUE_ID_REQUIRED_FIELD,
         types: list[LineageResourceType] | None = TYPES_FIELD,
         depth: int = DEPTH_FIELD,
+        project_dir: str | None = Field(
+            default=None, description=project_dir_description
+        ),
     ) -> dict[str, Any]:
-        manifest = _get_manifest()
+        manifest = _get_manifest(project_dir=project_dir)
         model_lineage = ModelLineage.from_manifest(
             manifest,
             unique_id=unique_id,
@@ -350,6 +415,9 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
     def get_node_details_dev(
         node_id: str = Field(
             description=get_prompt("dbt_cli/args/node_id"),
+        ),
+        project_dir: str | None = Field(
+            default=None, description=project_dir_description
         ),
     ) -> dict[str, Any]:
         # Comprehensive list of output keys to include all available node metadata
@@ -398,6 +466,7 @@ def create_dbt_cli_tool_definitions(config: DbtCliConfig) -> list[ToolDefinition
             ["list", "--output", "json", "--output-keys", *output_keys],
             node_selection=node_id,
             is_selectable=True,
+            project_dir=project_dir,
         )
 
         node_result: dict[str, Any] | None = None
