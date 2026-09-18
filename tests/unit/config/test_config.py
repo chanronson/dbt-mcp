@@ -392,8 +392,10 @@ class TestLoadConfig:
         assert config.discovery_config_provider is not None
         assert config.semantic_layer_config_provider is not None
         assert config.admin_api_config_provider is not None
-        # CLI config still gated on concrete paths
-        assert config.dbt_cli_config is None
+        # CLI config registered without a default project when
+        # DBT_PROJECT_DIR is unset (per-call project_dir required)
+        assert config.dbt_cli_config is not None
+        assert config.dbt_cli_config.project_dir is None
 
     def test_invalid_environment_variable_types(self):
         # Test invalid integer types

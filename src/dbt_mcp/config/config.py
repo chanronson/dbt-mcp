@@ -1,3 +1,4 @@
+import logging
 import os
 import threading
 from collections.abc import Callable
@@ -33,6 +34,8 @@ from dbt_mcp.tools.toolsets import Toolset
 
 PACKAGE_NAME = "dbt-mcp"
 
+logger = logging.getLogger(__name__)
+
 TOOLSET_TO_DISABLE_ATTR = {
     Toolset.SEMANTIC_LAYER: "disable_semantic_layer",
     Toolset.ADMIN_API: "disable_admin_api",
@@ -60,7 +63,7 @@ TOOLSET_TO_ENABLE_ATTR = {
 
 @dataclass
 class DbtCliConfig:
-    project_dir: str
+    project_dir: str | None
     dbt_path: str
     dbt_cli_timeout: int
     binary_type: BinaryType
@@ -202,14 +205,20 @@ def load_config(enable_proxied_tools: bool = True) -> Config:
         max_response_chars=settings.sl_metrics_max_response_chars,
     )
 
-    # Detect binary type once (needed for CLI, codegen, and version detection)
+    # Detect binary type once (needed for CLI, codegen, and version detection).
+    # Binary detection needs only the binary, not a default project dir.
     binary_type: BinaryType | None = None
-    if settings.dbt_project_dir and settings.dbt_path:
+    if settings.dbt_path:
         binary_type = detect_binary_type(settings.dbt_path)
 
     # CLI/codegen/LSP — still conditional (need concrete paths at registration time)
     dbt_cli_config = None
-    if settings.dbt_project_dir and settings.dbt_path and binary_type is not None:
+    if settings.dbt_path and binary_type is not None:
+        if settings.dbt_project_dir is None:
+            logger.warning(
+                "DBT_PROJECT_DIR not set — dbt CLI tools registered without "
+                "a default project; project_dir must be passed per call."
+            )
         dbt_cli_config = DbtCliConfig(
             project_dir=settings.dbt_project_dir,
             dbt_path=settings.dbt_path,
@@ -250,12 +259,12 @@ def load_config(enable_proxied_tools: bool = True) -> Config:
     if not settings.disable_mcp_apps:
         apps_config = AppsConfig(cdn_base=settings.cdn_base)
 
-    # Version detection requires both a project dir and a dbt binary, and
-    # excludes dbt Cloud CLI because its --version reports the Go wrapper
-    # version. The provider defers the actual `dbt --version` subprocess
-    # until the first product_docs tool call so startup is never blocked.
+    # Version detection needs only a dbt binary, and excludes dbt Cloud CLI
+    # because its --version reports the Go wrapper version. The provider
+    # defers the actual `dbt --version` subprocess until the first
+    # product_docs tool call so startup is never blocked.
     dbt_version_provider = _make_dbt_version_provider(
-        dbt_path=settings.dbt_path if settings.dbt_project_dir else None,
+        dbt_path=settings.dbt_path,
         binary_type=binary_type,
     )
 

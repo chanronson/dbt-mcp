@@ -340,13 +340,21 @@ class DbtMcpSettings(BaseSettings):
                     f"Consider setting DBT_HOST='{result.base_host}' and keeping {prefix_env_var}='{prefix}'."
                 )
 
-        # CLI features
+        # CLI stays enabled without a default project dir (per-call
+        # project_dir); codegen still requires one. Flags are independent.
         cli_errors = validate_dbt_cli_settings(self)
         if cli_errors:
             object.__setattr__(self, "disable_dbt_cli", True)
             object.__setattr__(self, "disable_dbt_codegen", True)
             logger.warning(
                 f"CLI features have been automatically disabled due to misconfigurations:\n    {'\n    '.join(cli_errors)}."
+            )
+        elif validate_dbt_codegen_settings(self):
+            object.__setattr__(self, "disable_dbt_codegen", True)
+            logger.warning(
+                "DBT codegen tools have been automatically disabled: "
+                "DBT_PROJECT_DIR environment variable is required when dbt "
+                "codegen tools are enabled."
             )
         return self
 
@@ -506,15 +514,44 @@ def validate_dbt_platform_settings(settings: DbtMcpSettings) -> list[str]:
 
 
 def validate_dbt_cli_settings(settings: DbtMcpSettings) -> list[str]:
+    """Validate dbt CLI settings.
+
+    Errors are reported ONLY for DBT_PATH problems (missing, or neither an
+    existing path nor resolvable via PATH). A missing DBT_PROJECT_DIR is not
+    an error: CLI tools register without a default project and require
+    project_dir per call (warned about once in config loading).
+    """
     errors: list[str] = []
     if not settings.disable_dbt_cli:
-        if not settings.dbt_project_dir:
-            errors.append(
-                "DBT_PROJECT_DIR environment variable is required when dbt CLI tools are enabled."
-            )
         if not settings.dbt_path:
             errors.append(
                 "DBT_PATH environment variable is required when dbt CLI tools are enabled."
+            )
+        else:
+            dbt_path = Path(settings.dbt_path)
+            if not (dbt_path.exists() or shutil.which(dbt_path)):
+                errors.append(
+                    f"DBT_PATH executable can't be found: {settings.dbt_path}"
+                )
+    return errors
+
+
+def validate_dbt_codegen_settings(settings: DbtMcpSettings) -> list[str]:
+    """Validate dbt codegen settings.
+
+    Codegen keeps the old gate: it requires a default DBT_PROJECT_DIR plus
+    a usable DBT_PATH. Independent from the CLI flags so CLI tools can stay
+    enabled while codegen is auto-disabled.
+    """
+    errors: list[str] = []
+    if not settings.disable_dbt_codegen:
+        if not settings.dbt_project_dir:
+            errors.append(
+                "DBT_PROJECT_DIR environment variable is required when dbt codegen tools are enabled."
+            )
+        if not settings.dbt_path:
+            errors.append(
+                "DBT_PATH environment variable is required when dbt codegen tools are enabled."
             )
         else:
             dbt_path = Path(settings.dbt_path)
