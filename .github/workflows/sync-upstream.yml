@@ -1,0 +1,140 @@
+name: Sync upstream
+
+# Cadence: MANUAL-ONLY via workflow_dispatch (no automatic timing block here).
+# NOTE on why there is deliberately NO `schedule` block in this file:
+# GitHub `schedule` events only fire from the DEFAULT branch (`main`) — a
+# timing block living only on `dbt-cli-run-time-folder` would NEVER fire.
+# Enabling a weekly run later therefore means EITHER (a) moving/duplicating
+# this workflow to `main` (keeping `base: dbt-cli-run-time-folder` dispatch
+# logic), OR (b) keeping manual dispatch. Weekly Mon 08:00 is DEFERRED until
+# the user explicitly enables one of those paths.
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Upstream ref to merge (branch or tag, default main)"
+        required: false
+        default: "main"
+        type: string
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout@v4
+        with:
+          ref: dbt-cli-run-time-folder
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Add upstream remote
+        run: |
+          set -euo pipefail
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream https://github.com/dbt-labs/dbt-mcp.git
+          else
+            git remote add upstream https://github.com/dbt-labs/dbt-mcp.git
+          fi
+          git remote get-url upstream | grep -q "dbt-labs/dbt-mcp" || { echo "upstream remote mismatch: $(git remote get-url upstream)"; exit 1; }
+          git remote -v
+
+      - id: resolve
+        name: Resolve upstream ref
+        run: |
+          set -euo pipefail
+          REF="${{ inputs.upstream_ref }}"
+          REF="${REF:-main}"
+          if [[ -z "${REF}" ]]; then echo "empty upstream_ref"; exit 1; fi
+          git remote get-url upstream | grep -q "dbt-labs/dbt-mcp" || { echo "upstream remote mismatch: $(git remote get-url upstream)"; exit 1; }
+          if [[ "$REF" == v* ]]; then
+            git fetch upstream "refs/tags/${REF}:refs/tags/${REF}"
+            SHA="$(git rev-parse "${REF}^{}")"  # ^{} peels annotated tags
+          else
+            git fetch upstream "refs/heads/${REF}:refs/remotes/upstream/${REF}"
+            SHA="$(git rev-parse "refs/remotes/upstream/${REF}")"
+            # documented contract: FETCH_HEAD-only is NOT relied upon;
+            # the explicit refs/remotes/upstream/${REF} refspec above is the source.
+          fi
+          SANITIZED="$(printf '%s' "$REF" | tr -cs '[:alnum:]._-' '-')"
+          SHORT_SHA="$(printf '%s' "$SHA" | cut -c1-7)"
+          echo "upstream_ref=${REF} sha=${SHA} short_sha=${SHORT_SHA} branch=sync/upstream-${SANITIZED}"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "sync_branch=sync/upstream-${SANITIZED}" >> "$GITHUB_OUTPUT"
+          echo "SYNC_BRANCH=sync/upstream-${SANITIZED}" >> "$GITHUB_ENV"
+
+      - id: guard
+        name: Already-up-to-date guard
+        run: |
+          set -euo pipefail
+          SHA="${{ steps.resolve.outputs.sha }}"
+          if git merge-base --is-ancestor "$SHA" HEAD; then
+            echo "already up to date: $SHA is ancestor of HEAD; skipping merge+PR"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure git bot identity
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create sync branch
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          git checkout -B "$SYNC_BRANCH"
+
+      - name: Merge upstream into sync branch
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          git merge --no-ff "${{ steps.resolve.outputs.sha }}" -m "chore: merge upstream ${{ steps.resolve.outputs.ref }} (${{ steps.resolve.outputs.sha }})"
+
+      - name: Verify setup-python action exists
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          ls .github/actions/setup-python/action.yml
+
+      - name: Setup Python
+        if: steps.guard.outputs.skip != 'true'
+        uses: ./.github/actions/setup-python
+
+      - name: Install go-task
+        if: steps.guard.outputs.skip != 'true'
+        uses: ./.github/actions/setup-task
+
+      - name: Run unit tests
+        if: steps.guard.outputs.skip != 'true'
+        run: task test:unit
+
+      - name: Open sync PR
+        if: steps.guard.outputs.skip != 'true'
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # peter-evans/create-pull-request@v7
+        with:
+          token: ${{ github.token }}
+          base: dbt-cli-run-time-folder
+          branch: ${{ steps.resolve.outputs.sync_branch }}
+          title: "chore: sync upstream ${{ steps.resolve.outputs.ref }} (${{ steps.resolve.outputs.short_sha }})"
+          body: |
+            Automated upstream sync: merge of `${{ steps.resolve.outputs.ref }}` (`${{ steps.resolve.outputs.sha }}`) into `dbt-cli-run-time-folder`.
+            Test gate: `task test:unit` was green on the sync branch before this PR was opened.
+            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            A human merges after PR CI is green; the bot never merges.
+          labels: dependencies, automated-sync
+          draft: false
+          delete-branch: false
