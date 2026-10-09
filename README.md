@@ -79,54 +79,6 @@ Allowing your client to utilize dbt commands through the MCP tooling could modif
 - `show`: Executes SQL against the database and returns results.
 - `test`: Runs tests to validate data and model integrity.
 
-#### Runtime `project_dir`: contract and fallback
-
-Every dbt CLI tool accepts an optional per-call `project_dir` (must contain
-`dbt_project.yml`). `DBT_PROJECT_DIR` is now an optional startup default —
-the server starts without it, and CLI tools stay registered. Resolution per
-call: an explicit non-empty `project_dir` wins; `None`/empty/whitespace-only
-falls back to the configured `DBT_PROJECT_DIR`. When both are omitted/blank,
-the call fails with `No project directory: pass project_dir or set
-DBT_PROJECT_DIR`. `~` and env vars (`$HOME`/`${X}`) are expanded and relative
-paths resolve against the server working directory (symlinks followed; the
-effective path is always absolute). Validated at call time only, never at
-startup.
-
-#### Runtime `project_dir`: validation
-
-The resolved directory is checked in order; the first failure wins:
-
-| Check | Failure message |
-| --- | --- |
-| Path exists | `project_dir does not exist: <path>` |
-| Path is a directory | `project_dir is not a directory: <path>` |
-| Contains `dbt_project.yml` | `project_dir is not a dbt project (missing dbt_project.yml): <path>` |
-
-#### Runtime `project_dir`: Cloud CLI caveat
-
-Validation is identical for `DBT_CLOUD_CLI` (a local project dir is still
-required so manifests can switch per call). The only Cloud-specific
-difference is execution: the subprocess `cwd` is always the server working
-directory for Cloud CLI (the local dir is ignored at spawn time), and
-`--state` remains rejected for Cloud CLI.
-
-#### Runtime `project_dir`: security note
-
-The per-call `project_dir` override (v1) performs no allowlist check — any
-absolute path readable by the server is accepted. This carries risk: path
-traversal to sensitive directories, arbitrary local project execution, and
-`dbt_project.yml` presence is not a sandbox boundary. Only expose the server
-to trusted clients. An allowlist (e.g. `DBT_PROJECT_DIR_ALLOWLIST` or
-similar) is an explicit follow-up and is not implemented.
-
-#### Runtime `project_dir`: scope limitation (CLI-only)
-
-Passing `project_dir` to a dbt CLI tool does not move anything else. LSP
-tools stay startup-bound (`LspConfig` / `LocalLSPConnectionProvider.project_dir`
-unchanged), and the same applies to codegen (`DbtCodegenConfig` untouched),
-Discovery / Semantic Layer / Admin tools, `dbt_version_provider`, and
-`DBT_PROFILES_DIR`.
-
 ### Admin API
 
 To learn more about the dbt Administrative API, click [here](https://docs.getdbt.com/docs/dbt-cloud-apis/admin-cloud-api).
@@ -168,6 +120,54 @@ These tools provide information about the MCP server itself.
 - `get_mcp_server_branch`: Returns the current git branch of the running dbt MCP server.
 - `get_mcp_server_version`: Returns the current version of the dbt MCP server.
 
+
+## Runtime `project_dir` (dbt CLI)
+
+Every dbt CLI tool accepts an optional per-call `project_dir` (must contain
+`dbt_project.yml`). `DBT_PROJECT_DIR` is now an optional startup default —
+the server starts without it, and CLI tools stay registered. Resolution per
+call: an explicit non-empty `project_dir` wins; `None`/empty/whitespace-only
+falls back to the configured `DBT_PROJECT_DIR`. When both are omitted/blank,
+the call fails with `No project directory: pass project_dir or set
+DBT_PROJECT_DIR`. `~` and env vars (`$HOME`/`${X}`) are expanded and relative
+paths resolve against the server working directory (symlinks followed; the
+effective path is always absolute). Validated at call time only, never at
+startup.
+
+### Validation
+
+The resolved directory is checked in order; the first failure wins:
+
+| Check | Failure message |
+| --- | --- |
+| Path exists | `project_dir does not exist: <path>` |
+| Path is a directory | `project_dir is not a directory: <path>` |
+| Contains `dbt_project.yml` | `project_dir is not a dbt project (missing dbt_project.yml): <path>` |
+
+### Cloud CLI caveat
+
+Validation is identical for `DBT_CLOUD_CLI` (a local project dir is still
+required so manifests can switch per call). The only Cloud-specific
+difference is execution: the subprocess `cwd` is always the server working
+directory for Cloud CLI (the local dir is ignored at spawn time), and
+`--state` remains rejected for Cloud CLI.
+
+### Security note
+
+The per-call `project_dir` override (v1) performs no allowlist check — any
+absolute path readable by the server is accepted. This carries risk: path
+traversal to sensitive directories, arbitrary local project execution, and
+`dbt_project.yml` presence is not a sandbox boundary. Only expose the server
+to trusted clients. An allowlist (e.g. `DBT_PROJECT_DIR_ALLOWLIST` or
+similar) is an explicit follow-up and is not implemented.
+
+### Scope limitation (CLI-only)
+
+Passing `project_dir` to a dbt CLI tool does not move anything else. LSP
+tools stay startup-bound (`LspConfig` / `LocalLSPConnectionProvider.project_dir`
+unchanged), and the same applies to codegen (`DbtCodegenConfig` untouched),
+Discovery / Semantic Layer / Admin tools, `dbt_version_provider`, and
+`DBT_PROFILES_DIR`.
 
 ## Examples
 

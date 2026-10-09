@@ -877,9 +877,7 @@ def test_get_lineage_dev_resolves_manifest_from_relative_project_dir(
     (manifest_dir / "manifest.json").write_text(json.dumps({}))
     # Part 3 validates the resolved dir at call time: the project needs a
     # dbt_project.yml marker, not just target/manifest.json.
-    (tmp_path / project_name / "dbt_project.yml").write_text(
-        "name: my_project\n"
-    )
+    (tmp_path / project_name / "dbt_project.yml").write_text("name: my_project\n")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: mock_process)
